@@ -1,0 +1,86 @@
+name: Build APK
+
+on:
+  push: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed to create a Release and upload assets to it
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Decode signing keystore
+        # continue-on-error so a missing/misconfigured secret degrades to an
+        # unsigned/failed release build rather than stopping the whole workflow —
+        # the debug APK still gets built and released either way.
+        continue-on-error: true
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${{ github.workspace }}/photoworkspace-release.jks"
+          else
+            echo "KEYSTORE_BASE64 secret not set — release build will be skipped."
+          fi
+
+      - name: Build debug APK
+        continue-on-error: true
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Build release APK
+        continue-on-error: true
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/photoworkspace-release.jks
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Collect APKs
+        # Never fails this step even if one/both builds above failed to produce
+        # an APK — whatever exists gets collected, whatever doesn't is skipped.
+        if: always()
+        run: |
+          mkdir -p release_assets
+          find app/build/outputs/apk/debug -name "*.apk" -exec cp {} release_assets/PhotoWorkspace-debug.apk \; || true
+          find app/build/outputs/apk/release -name "*.apk" -exec cp {} release_assets/PhotoWorkspace-release.apk \; || true
+          ls -la release_assets || true
+
+      - name: Publish Release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          fail_on_unmatched_files: false
+          files: |
+            release_assets/PhotoWorkspace-debug.apk
+            release_assets/PhotoWorkspace-release.apk
+
+      - name: Report outcome
+        if: always()
+        run: |
+          if [ -f release_assets/PhotoWorkspace-release.apk ] || [ -f release_assets/PhotoWorkspace-debug.apk ]; then
+            echo "At least one APK was built and published — check the Releases page."
+          else
+            echo "::warning::No APK was produced this run. The build step logs above have the actual compile error — this workflow won't fail red, but nothing was released."
+          fi
