@@ -20,16 +20,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+          gradle-version: 9.3.1  # matches gradle/wrapper/gradle-wrapper.properties
 
       - name: Decode signing keystore
         # continue-on-error so a missing/misconfigured secret degrades to an
@@ -45,7 +39,7 @@ jobs:
 
       - name: Build debug APK
         continue-on-error: true
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Build release APK
         continue-on-error: true
@@ -53,7 +47,7 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/photoworkspace-release.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --stacktrace
+        run: gradle assembleRelease --stacktrace
 
       - name: Collect APKs
         # Never fails this step even if one/both builds above failed to produce
