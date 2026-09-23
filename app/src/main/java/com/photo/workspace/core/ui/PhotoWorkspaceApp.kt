@@ -46,6 +46,7 @@ fun PhotoWorkspaceApp(
     val reconstructionReport by viewModel.reconstructionReport.collectAsState()
     val showGrid by viewModel.showGrid.collectAsState()
     val snapToGuides by viewModel.snapToGuides.collectAsState()
+    val penAnchors by viewModel.penAnchors.collectAsState()
 
     // Sheet / Dialog visibility states
     var showLayersSheet by remember { mutableStateOf(false) }
@@ -237,6 +238,9 @@ fun PhotoWorkspaceApp(
                     viewModel.addBrushStroke(stroke)
                 },
                 onCommitTransform = { viewModel.commitPendingChange() },
+                penAnchors = penAnchors,
+                onAddPenAnchor = { x, y -> viewModel.addPenAnchor(x, y) },
+                onFinishPenPath = { closed -> viewModel.finishPenPath(closed) },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -255,6 +259,44 @@ fun PhotoWorkspaceApp(
                         fontSize = 11.sp,
                         color = CyanAccent
                     )
+                }
+            }
+
+            // Pen tool in-progress controls
+            if (activeTool == EditorTool.PEN && penAnchors.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(StudioSurface.copy(alpha = 0.95f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { viewModel.cancelPenPath() }) {
+                        Text("Cancel", color = Color.White, fontSize = 12.sp)
+                    }
+                    TextButton(
+                        onClick = { viewModel.undoPenAnchor() },
+                        enabled = penAnchors.isNotEmpty()
+                    ) {
+                        Text("Undo point", color = CyanAccent, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = { viewModel.finishPenPath(false) },
+                        enabled = penAnchors.size >= 2,
+                        colors = ButtonDefaults.buttonColors(containerColor = VioletPrimary)
+                    ) {
+                        Text("Finish", fontSize = 12.sp)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Button(
+                        onClick = { viewModel.finishPenPath(true) },
+                        enabled = penAnchors.size >= 3,
+                        colors = ButtonDefaults.buttonColors(containerColor = VioletPrimary)
+                    ) {
+                        Text("Close path", fontSize = 12.sp)
+                    }
                 }
             }
 

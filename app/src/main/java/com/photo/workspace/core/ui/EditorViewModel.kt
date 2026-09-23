@@ -97,6 +97,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _animationProgress = MutableStateFlow(1f) // 0f to 1f
     val animationProgress: StateFlow<Float> = _animationProgress.asStateFlow()
 
+    // Pen tool: anchors for the vector path currently being drawn (not yet committed as a layer)
+    private val _penAnchors = MutableStateFlow<List<PathAnchor>>(emptyList())
+    val penAnchors: StateFlow<List<PathAnchor>> = _penAnchors.asStateFlow()
+
     init {
         // Initialize folders and sample assets in background
         viewModelScope.launch(Dispatchers.IO) {
@@ -193,6 +197,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setActiveTool(tool: EditorTool) {
+        if (tool != EditorTool.PEN && _penAnchors.value.isNotEmpty()) {
+            _penAnchors.value = emptyList()
+        }
         _activeTool.value = tool
     }
 
@@ -504,6 +511,53 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         updatePageLayers(newLayers)
+    }
+
+    // Pen tool: click-to-place vector path anchors, committed as a VECTOR_PATH layer.
+    fun addPenAnchor(x: Float, y: Float) {
+        _penAnchors.value = _penAnchors.value + PathAnchor(x = x, y = y)
+    }
+
+    fun undoPenAnchor() {
+        val current = _penAnchors.value
+        if (current.isNotEmpty()) {
+            _penAnchors.value = current.dropLast(1)
+        }
+    }
+
+    fun cancelPenPath() {
+        _penAnchors.value = emptyList()
+    }
+
+    fun finishPenPath(closed: Boolean) {
+        val anchors = _penAnchors.value
+        if (anchors.size < 2) {
+            _penAnchors.value = emptyList()
+            return
+        }
+        pushHistory()
+        val minX = anchors.minOf { it.x }
+        val minY = anchors.minOf { it.y }
+        val maxX = anchors.maxOf { it.x }
+        val maxY = anchors.maxOf { it.y }
+        val newLayer = Layer(
+            name = "Vector Path",
+            type = LayerType.VECTOR_PATH,
+            x = minX,
+            y = minY,
+            width = (maxX - minX).coerceAtLeast(1f),
+            height = (maxY - minY).coerceAtLeast(1f),
+            vectorPathData = VectorPathData(
+                anchors = anchors,
+                isClosed = closed
+            )
+        )
+        val page = getActivePage()
+        updatePageLayers(page.layers + newLayer)
+        _selectedLayerId.value = newLayer.id
+        _penAnchors.value = emptyList()
+        _activeTool.value = EditorTool.SELECT
+        _statusMessage.value = "Vector path added"
     }
 
     // Multi-page Artboard management

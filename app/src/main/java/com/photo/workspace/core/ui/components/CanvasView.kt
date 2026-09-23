@@ -45,6 +45,9 @@ fun CanvasView(
     onResizeLayer: (String, Float, Float) -> Unit,
     onAddBrushStroke: (BrushStroke) -> Unit,
     onCommitTransform: () -> Unit = {},
+    penAnchors: List<PathAnchor> = emptyList(),
+    onAddPenAnchor: (Float, Float) -> Unit = { _, _ -> },
+    onFinishPenPath: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Canvas container state
@@ -78,8 +81,18 @@ fun CanvasView(
                 .shadow(16.dp, RoundedCornerShape(4.dp))
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color(page.backgroundColor))
-                .pointerInput(page.id, activeTool, selectedLayerId) {
+                .pointerInput(page.id, activeTool, selectedLayerId, penAnchors.size) {
                     when (activeTool) {
+                        EditorTool.PEN -> {
+                            detectTapGestures(
+                                onTap = { tapOffset ->
+                                    onAddPenAnchor(tapOffset.x / scaleFactor, tapOffset.y / scaleFactor)
+                                },
+                                onDoubleTap = {
+                                    onFinishPenPath(penAnchors.size >= 3)
+                                }
+                            )
+                        }
                         EditorTool.BRUSH -> {
                             detectDragGestures(
                                 onDragStart = { offset ->
@@ -211,6 +224,11 @@ fun CanvasView(
                         color = Color(0xFF38BDF8),
                         style = Stroke(width = 8f * scaleFactor, cap = StrokeCap.Round, join = StrokeJoin.Round)
                     )
+                }
+
+                // 6. Draw in-progress pen tool anchors + connecting lines
+                if (penAnchors.isNotEmpty()) {
+                    drawPenPathPreview(penAnchors, scaleFactor)
                 }
             }
 
@@ -480,6 +498,30 @@ private fun DrawScope.drawBrushStrokes(layer: Layer, scale: Float) {
                 )
             )
         }
+    }
+}
+
+private fun DrawScope.drawPenPathPreview(anchors: List<PathAnchor>, scale: Float) {
+    val path = Path()
+    val first = anchors.first()
+    path.moveTo(first.x * scale, first.y * scale)
+    for (i in 1 until anchors.size) {
+        val a = anchors[i]
+        path.lineTo(a.x * scale, a.y * scale)
+    }
+    drawPath(
+        path = path,
+        color = CyanAccent,
+        style = Stroke(width = 2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f))
+    )
+    anchors.forEachIndexed { index, a ->
+        val center = Offset(a.x * scale, a.y * scale)
+        drawCircle(Color.White, radius = 7f, center = center)
+        drawCircle(
+            if (index == 0) Color(0xFFEC4899) else CyanAccent,
+            radius = 5f,
+            center = center
+        )
     }
 }
 

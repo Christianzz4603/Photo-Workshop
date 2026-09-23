@@ -258,6 +258,14 @@ fun BottomToolBar(
                 onClick = { onSelectTool(EditorTool.ADJUSTMENTS) }
             )
 
+            // Pen / Vector Path Tool
+            ToolButton(
+                icon = Icons.Default.Timeline,
+                label = "Pen",
+                isSelected = activeTool == EditorTool.PEN,
+                onClick = { onSelectTool(EditorTool.PEN) }
+            )
+
             Divider(
                 modifier = Modifier
                     .height(28.dp)
