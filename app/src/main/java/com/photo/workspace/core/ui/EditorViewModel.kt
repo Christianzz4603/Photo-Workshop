@@ -514,8 +514,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Pen tool: click-to-place vector path anchors, committed as a VECTOR_PATH layer.
-    fun addPenAnchor(x: Float, y: Float) {
-        _penAnchors.value = _penAnchors.value + PathAnchor(x = x, y = y)
+    fun addPenAnchor(x: Float, y: Float, handleOutX: Float? = null, handleOutY: Float? = null) {
+        val anchor = if (handleOutX != null && handleOutY != null) {
+            // Mirror the dragged-out handle to the opposite side for a smooth curve through this anchor
+            PathAnchor(
+                x = x, y = y,
+                handleOutX = handleOutX, handleOutY = handleOutY,
+                handleInX = 2 * x - handleOutX, handleInY = 2 * y - handleOutY
+            )
+        } else {
+            PathAnchor(x = x, y = y)
+        }
+        _penAnchors.value = _penAnchors.value + anchor
     }
 
     fun undoPenAnchor() {

@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,7 +48,7 @@ fun CanvasView(
     onAddBrushStroke: (BrushStroke) -> Unit,
     onCommitTransform: () -> Unit = {},
     penAnchors: List<PathAnchor> = emptyList(),
-    onAddPenAnchor: (Float, Float) -> Unit = { _, _ -> },
+    onAddPenAnchor: (Float, Float, Float?, Float?) -> Unit = { _, _, _, _ -> },
     onFinishPenPath: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -63,6 +65,10 @@ fun CanvasView(
 
     // Active brush stroke during freehand draw
     var activeBrushPoints by remember { mutableStateOf<List<StrokePoint>>(emptyList()) }
+
+    // Pen tool: live press position + drag position while placing/curving an anchor
+    var pendingPenDown by remember { mutableStateOf<Offset?>(null) }
+    var pendingPenDrag by remember { mutableStateOf<Offset?>(null) }
 
     Box(
         modifier = modifier
@@ -84,14 +90,34 @@ fun CanvasView(
                 .pointerInput(page.id, activeTool, selectedLayerId, penAnchors.size) {
                     when (activeTool) {
                         EditorTool.PEN -> {
-                            detectTapGestures(
-                                onTap = { tapOffset ->
-                                    onAddPenAnchor(tapOffset.x / scaleFactor, tapOffset.y / scaleFactor)
-                                },
-                                onDoubleTap = {
-                                    onFinishPenPath(penAnchors.size >= 3)
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                pendingPenDown = down.position
+                                pendingPenDrag = down.position
+                                val pointerId = down.id
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == pointerId }
+                                    if (change == null || !change.pressed) break
+                                    change.consume()
+                                    pendingPenDrag = change.position
                                 }
-                            )
+                                val startPos = pendingPenDown ?: down.position
+                                val endPos = pendingPenDrag ?: startPos
+                                val dragVec = endPos - startPos
+                                val anchorX = startPos.x / scaleFactor
+                                val anchorY = startPos.y / scaleFactor
+                                if (dragVec.getDistance() > 14f) {
+                                    val handleOutX = anchorX + dragVec.x / scaleFactor
+                                    val handleOutY = anchorY + dragVec.y / scaleFactor
+                                    onAddPenAnchor(anchorX, anchorY, handleOutX, handleOutY)
+                                } else {
+                                    onAddPenAnchor(anchorX, anchorY, null, null)
+                                }
+                                pendingPenDown = null
+                                pendingPenDrag = null
+                            }
                         }
                         EditorTool.BRUSH -> {
                             detectDragGestures(
@@ -229,6 +255,20 @@ fun CanvasView(
                 // 6. Draw in-progress pen tool anchors + connecting lines
                 if (penAnchors.isNotEmpty()) {
                     drawPenPathPreview(penAnchors, scaleFactor)
+                }
+
+                // 7. Live rubber-band line while dragging out a curve handle for the next anchor
+                val penDown = pendingPenDown
+                val penDrag = pendingPenDrag
+                if (penDown != null && penDrag != null) {
+                    drawLine(
+                        color = Color(0xFFEC4899),
+                        start = penDown,
+                        end = penDrag,
+                        strokeWidth = 2f
+                    )
+                    drawCircle(Color(0xFFEC4899), radius = 5f, center = penDrag)
+                    drawCircle(Color.White, radius = 7f, center = penDown, style = Stroke(width = 1.5f))
                 }
             }
 
@@ -501,14 +541,30 @@ private fun DrawScope.drawBrushStrokes(layer: Layer, scale: Float) {
     }
 }
 
-private fun DrawScope.drawPenPathPreview(anchors: List<PathAnchor>, scale: Float) {
+private fun buildVectorPath(anchors: List<PathAnchor>, scale: Float, closed: Boolean): Path {
     val path = Path()
+    if (anchors.isEmpty()) return path
     val first = anchors.first()
     path.moveTo(first.x * scale, first.y * scale)
     for (i in 1 until anchors.size) {
-        val a = anchors[i]
-        path.lineTo(a.x * scale, a.y * scale)
+        val prev = anchors[i - 1]
+        val curr = anchors[i]
+        if (prev.handleOutX != null && curr.handleInX != null) {
+            path.cubicTo(
+                prev.handleOutX * scale, (prev.handleOutY ?: prev.y) * scale,
+                curr.handleInX * scale, (curr.handleInY ?: curr.y) * scale,
+                curr.x * scale, curr.y * scale
+            )
+        } else {
+            path.lineTo(curr.x * scale, curr.y * scale)
+        }
     }
+    if (closed) path.close()
+    return path
+}
+
+private fun DrawScope.drawPenPathPreview(anchors: List<PathAnchor>, scale: Float) {
+    val path = buildVectorPath(anchors, scale, closed = false)
     drawPath(
         path = path,
         color = CyanAccent,
@@ -516,6 +572,17 @@ private fun DrawScope.drawPenPathPreview(anchors: List<PathAnchor>, scale: Float
     )
     anchors.forEachIndexed { index, a ->
         val center = Offset(a.x * scale, a.y * scale)
+        // Handle lines (Illustrator-style) for anchors that have curve handles
+        if (a.handleOutX != null) {
+            val h = Offset(a.handleOutX * scale, (a.handleOutY ?: a.y) * scale)
+            drawLine(CyanAccent.copy(alpha = 0.6f), center, h, strokeWidth = 1.5f)
+            drawCircle(CyanAccent, radius = 4f, center = h)
+        }
+        if (a.handleInX != null) {
+            val h = Offset(a.handleInX * scale, (a.handleInY ?: a.y) * scale)
+            drawLine(CyanAccent.copy(alpha = 0.6f), center, h, strokeWidth = 1.5f)
+            drawCircle(CyanAccent, radius = 4f, center = h)
+        }
         drawCircle(Color.White, radius = 7f, center = center)
         drawCircle(
             if (index == 0) Color(0xFFEC4899) else CyanAccent,
@@ -529,15 +596,8 @@ private fun DrawScope.drawVectorPath(layer: Layer, scale: Float) {
     val vec = layer.vectorPathData ?: return
     if (vec.anchors.isEmpty()) return
 
-    val path = Path()
-    val first = vec.anchors.first()
-    path.moveTo(first.x * scale, first.y * scale)
-    for (i in 1 until vec.anchors.size) {
-        val a = vec.anchors[i]
-        path.lineTo(a.x * scale, a.y * scale)
-    }
+    val path = buildVectorPath(vec.anchors, scale, closed = vec.isClosed)
     if (vec.isClosed) {
-        path.close()
         drawPath(path, Color(vec.fillColor).copy(alpha = layer.opacity))
     }
     if (vec.strokeWidth > 0f) {

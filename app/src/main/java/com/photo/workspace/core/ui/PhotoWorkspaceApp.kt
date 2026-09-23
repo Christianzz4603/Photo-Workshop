@@ -239,7 +239,7 @@ fun PhotoWorkspaceApp(
                 },
                 onCommitTransform = { viewModel.commitPendingChange() },
                 penAnchors = penAnchors,
-                onAddPenAnchor = { x, y -> viewModel.addPenAnchor(x, y) },
+                onAddPenAnchor = { x, y, hx, hy -> viewModel.addPenAnchor(x, y, hx, hy) },
                 onFinishPenPath = { closed -> viewModel.finishPenPath(closed) },
                 modifier = Modifier.fillMaxSize()
             )
