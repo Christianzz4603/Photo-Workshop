@@ -1,6 +1,0 @@
-{
-  "name": "Photo Workspace",
-  "description": "Offline, local-first creative studio combining Canva and Photoshop with multi-page canvas, layers, vector shapes, typography, and .mwproject/.mwpack support.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
