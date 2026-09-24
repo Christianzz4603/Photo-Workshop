@@ -59,6 +59,18 @@ jobs:
           find app/build/outputs/apk/release -name "*.apk" -exec cp {} release_assets/PhotoWorkspace-release.apk \; || true
           ls -la release_assets || true
 
+      - name: Upload APKs as workflow artifacts
+        # In addition to the GitHub Release below, also attach the APKs directly to this
+        # workflow run so they can be grabbed from the Actions tab without needing a Release
+        # (useful once this workflow ever runs on a PR/branch rather than main pushes).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoWorkspace-apks-${{ github.run_number }}
+          path: release_assets/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Publish Release
         if: always()
         uses: softprops/action-gh-release@v2
