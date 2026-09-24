@@ -34,6 +34,8 @@ import com.photo.workspace.core.data.model.*
 import com.photo.workspace.core.ui.EditorTool
 import com.photo.workspace.ui.theme.*
 import com.photo.workspace.core.util.BitmapCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun CanvasView(
@@ -61,6 +63,24 @@ fun CanvasView(
         val sx = (containerWidth - 32f) / page.width.toFloat()
         val sy = (containerHeight - 32f) / page.height.toFloat()
         minOf(sx, sy, 0.95f).coerceAtLeast(0.1f)
+    }
+
+    // Pre-warm the bitmap cache off the UI thread for every image layer on this page, so the
+    // synchronous BitmapCache.decodeSampled() call inside the Canvas draw phase below (which
+    // cannot itself suspend) is normally a cache hit instead of blocking the UI thread with a
+    // disk read + bitmap decode the first time a page is shown or an image layer is added.
+    val imageLayerSizes = remember(page.layers, scaleFactor) {
+        page.layers.filter { it.type == LayerType.IMAGE }
+            .mapNotNull { layer ->
+                layer.imageData?.imagePath?.takeIf { it.isNotEmpty() }?.let { path ->
+                    Triple(path, (layer.width * scaleFactor).toInt().coerceAtLeast(1), (layer.height * scaleFactor).toInt().coerceAtLeast(1))
+                }
+            }
+    }
+    LaunchedEffect(imageLayerSizes) {
+        withContext(Dispatchers.Default) {
+            imageLayerSizes.forEach { (path, w, h) -> BitmapCache.warm(path, w, h) }
+        }
     }
 
     // Active brush stroke during freehand draw
