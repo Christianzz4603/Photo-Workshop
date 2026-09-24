@@ -222,6 +222,24 @@ class CanvasExporter(
         }
     }
 
+    /**
+     * Maps an ImageData's normalized (0..1) crop window onto actual bitmap pixel coordinates,
+     * guarding against a degenerate/inverted rect (e.g. corrupted project data) by falling back
+     * to the full bitmap rather than passing Canvas.drawBitmap a zero-area or inverted Rect,
+     * which throws.
+     */
+    private fun cropRectFor(img: ImageData, bmpWidth: Int, bmpHeight: Int): Rect {
+        val left = (img.cropLeft * bmpWidth).toInt().coerceIn(0, bmpWidth)
+        val top = (img.cropTop * bmpHeight).toInt().coerceIn(0, bmpHeight)
+        val right = (img.cropRight * bmpWidth).toInt().coerceIn(0, bmpWidth)
+        val bottom = (img.cropBottom * bmpHeight).toInt().coerceIn(0, bmpHeight)
+        return if (right > left && bottom > top) {
+            Rect(left, top, right, bottom)
+        } else {
+            Rect(0, 0, bmpWidth, bmpHeight)
+        }
+    }
+
     private fun drawImageLayer(canvas: Canvas, layer: Layer, alpha: Int) {
         val img = layer.imageData ?: return
         val paint = Paint().apply {
@@ -239,7 +257,7 @@ class CanvasExporter(
         } else null
 
         if (bmp != null) {
-            val src = Rect(0, 0, bmp.width, bmp.height)
+            val src = cropRectFor(img, bmp.width, bmp.height)
             val dst = RectF(0f, 0f, layer.width, layer.height)
             canvas.drawBitmap(bmp, src, dst, paint)
         } else {

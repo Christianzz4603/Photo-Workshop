@@ -118,6 +118,10 @@ class ProjectStorage(private val workspaceManager: WorkspaceManager) {
             imgObj.put("imagePath", id.imagePath)
             id.base64Data?.let { imgObj.put("base64Data", it) }
             imgObj.put("aspectRatio", id.aspectRatio.toDouble())
+            imgObj.put("cropLeft", id.cropLeft.toDouble())
+            imgObj.put("cropTop", id.cropTop.toDouble())
+            imgObj.put("cropRight", id.cropRight.toDouble())
+            imgObj.put("cropBottom", id.cropBottom.toDouble())
 
             val adjObj = JSONObject()
             val adj = id.adjustments
@@ -366,7 +370,11 @@ class ProjectStorage(private val workspaceManager: WorkspaceManager) {
                 imagePath = imgObj.optString("imagePath", ""),
                 base64Data = if (imgObj.has("base64Data")) imgObj.getString("base64Data") else null,
                 adjustments = adjustments,
-                aspectRatio = imgObj.optDouble("aspectRatio", 1.0).toFloat()
+                aspectRatio = imgObj.optDouble("aspectRatio", 1.0).toFloat(),
+                cropLeft = imgObj.optDouble("cropLeft", 0.0).toFloat(),
+                cropTop = imgObj.optDouble("cropTop", 0.0).toFloat(),
+                cropRight = imgObj.optDouble("cropRight", 1.0).toFloat(),
+                cropBottom = imgObj.optDouble("cropBottom", 1.0).toFloat()
             )
         }
 

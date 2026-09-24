@@ -241,6 +241,7 @@ fun PhotoWorkspaceApp(
                 penAnchors = penAnchors,
                 onAddPenAnchor = { x, y, hx, hy -> viewModel.addPenAnchor(x, y, hx, hy) },
                 onFinishPenPath = { closed -> viewModel.finishPenPath(closed) },
+                onPickColor = { x, y -> viewModel.pickColorAndApply(x, y) },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -346,6 +347,7 @@ fun PhotoWorkspaceApp(
             onUpdateText = { viewModel.updateTextData(selectedLayer.id, it) },
             onUpdateShape = { viewModel.updateShapeData(selectedLayer.id, it) },
             onUpdateAdjustments = { viewModel.updateImageAdjustments(selectedLayer.id, it) },
+            onUpdateCrop = { l, t, r, b -> viewModel.updateImageCrop(selectedLayer.id, l, t, r, b) },
             onUpdateAnimation = { viewModel.updateAnimation(selectedLayer.id, it) },
             onAlign = { viewModel.alignLayer(selectedLayer.id, it) },
             onDismiss = { showPropertiesSheet = false },

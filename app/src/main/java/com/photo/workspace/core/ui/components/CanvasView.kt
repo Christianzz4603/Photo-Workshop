@@ -52,6 +52,7 @@ fun CanvasView(
     penAnchors: List<PathAnchor> = emptyList(),
     onAddPenAnchor: (Float, Float, Float?, Float?) -> Unit = { _, _, _, _ -> },
     onFinishPenPath: (Boolean) -> Unit = {},
+    onPickColor: (Float, Float) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     // Canvas container state
@@ -72,8 +73,16 @@ fun CanvasView(
     val imageLayerSizes = remember(page.layers, scaleFactor) {
         page.layers.filter { it.type == LayerType.IMAGE }
             .mapNotNull { layer ->
-                layer.imageData?.imagePath?.takeIf { it.isNotEmpty() }?.let { path ->
-                    Triple(path, (layer.width * scaleFactor).toInt().coerceAtLeast(1), (layer.height * scaleFactor).toInt().coerceAtLeast(1))
+                val img = layer.imageData
+                img?.imagePath?.takeIf { it.isNotEmpty() }?.let { path ->
+                    // Must match the request size drawImagePlaceholder actually decodes at
+                    // (which grows to compensate for a crop window), or this warm-up would
+                    // populate a cache bucket the draw phase never reads from.
+                    val cropSpanX = (img.cropRight - img.cropLeft).coerceAtLeast(0.05f)
+                    val cropSpanY = (img.cropBottom - img.cropTop).coerceAtLeast(0.05f)
+                    val w = ((layer.width * scaleFactor) / cropSpanX).toInt().coerceAtLeast(1)
+                    val h = ((layer.height * scaleFactor) / cropSpanY).toInt().coerceAtLeast(1)
+                    Triple(path, w, h)
                 }
             }
     }
@@ -109,6 +118,13 @@ fun CanvasView(
                 .background(Color(page.backgroundColor))
                 .pointerInput(page.id, activeTool, selectedLayerId, penAnchors.size) {
                     when (activeTool) {
+                        EditorTool.EYEDROPPER -> {
+                            detectTapGestures(
+                                onTap = { tapOffset ->
+                                    onPickColor(tapOffset.x / scaleFactor, tapOffset.y / scaleFactor)
+                                }
+                            )
+                        }
                         EditorTool.PEN -> {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -492,13 +508,36 @@ private fun DrawScope.drawText(layer: Layer, x: Float, y: Float, w: Float, h: Fl
     }
 }
 
+/**
+ * Maps an ImageData's normalized (0..1) crop window onto actual bitmap pixel coordinates.
+ * Falls back to the full bitmap on a degenerate/inverted rect rather than passing
+ * Canvas.drawBitmap a zero-area or inverted Rect, which throws.
+ */
+private fun imageCropRect(img: ImageData?, bmpWidth: Int, bmpHeight: Int): android.graphics.Rect {
+    if (img == null) return android.graphics.Rect(0, 0, bmpWidth, bmpHeight)
+    val left = (img.cropLeft * bmpWidth).toInt().coerceIn(0, bmpWidth)
+    val top = (img.cropTop * bmpHeight).toInt().coerceIn(0, bmpHeight)
+    val right = (img.cropRight * bmpWidth).toInt().coerceIn(0, bmpWidth)
+    val bottom = (img.cropBottom * bmpHeight).toInt().coerceIn(0, bmpHeight)
+    return if (right > left && bottom > top) {
+        android.graphics.Rect(left, top, right, bottom)
+    } else {
+        android.graphics.Rect(0, 0, bmpWidth, bmpHeight)
+    }
+}
+
 private fun DrawScope.drawImagePlaceholder(layer: Layer, x: Float, y: Float, w: Float, h: Float) {
     val img = layer.imageData
     var bmp: Bitmap? = null
     if (img != null && img.imagePath.isNotEmpty()) {
-        // Cached + downsampled to the on-screen size — avoids a full-resolution disk
-        // decode on every single recomposition (every drag/resize frame) of this layer.
-        bmp = BitmapCache.decodeSampled(img.imagePath, w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1))
+        // If cropped, we're only ever showing a fraction of the source image in this box, so
+        // request a proportionally larger decode -- otherwise the cropped-in sub-rect of an
+        // already-downsampled bitmap would look blurry/blocky at the crop's effective zoom.
+        val cropSpanX = (img.cropRight - img.cropLeft).coerceAtLeast(0.05f)
+        val cropSpanY = (img.cropBottom - img.cropTop).coerceAtLeast(0.05f)
+        val reqW = (w / cropSpanX).toInt().coerceAtLeast(1)
+        val reqH = (h / cropSpanY).toInt().coerceAtLeast(1)
+        bmp = BitmapCache.decodeSampled(img.imagePath, reqW, reqH)
     }
 
     if (bmp != null) {
@@ -508,7 +547,7 @@ private fun DrawScope.drawImagePlaceholder(layer: Layer, x: Float, y: Float, w: 
                 isAntiAlias = true
                 alpha = (layer.opacity * 255).toInt()
             }
-            val src = android.graphics.Rect(0, 0, bmp.width, bmp.height)
+            val src = imageCropRect(img, bmp.width, bmp.height)
             val dst = android.graphics.RectF(x, y, x + w, y + h)
             nativeCanvas.drawBitmap(bmp, src, dst, paint)
         }

@@ -31,6 +31,7 @@ fun PropertiesBottomSheet(
     onUpdateText: (TextData) -> Unit,
     onUpdateShape: (ShapeData) -> Unit,
     onUpdateAdjustments: (ImageAdjustments) -> Unit,
+    onUpdateCrop: (Float, Float, Float, Float) -> Unit,
     onUpdateAnimation: (ElementAnimation) -> Unit,
     onAlign: (CanvasAlignment) -> Unit,
     onDismiss: () -> Unit,
@@ -92,10 +93,16 @@ fun PropertiesBottomSheet(
                     }
                 }
                 LayerType.IMAGE -> {
-                    val adjustments = layer.imageData?.adjustments ?: ImageAdjustments()
+                    val imageData = layer.imageData ?: ImageData()
                     ImageAdjustmentsSection(
-                        adjustments = adjustments,
+                        adjustments = imageData.adjustments,
                         onUpdate = onUpdateAdjustments,
+                        onCommit = onCommitChange
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CropSection(
+                        imageData = imageData,
+                        onUpdateCrop = onUpdateCrop,
                         onCommit = onCommitChange
                     )
                 }
@@ -299,6 +306,34 @@ private fun ImageAdjustmentsSection(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Photoshop-Style Image Adjustments", style = MaterialTheme.typography.titleSmall, color = CyanAccent)
 
+        // One-tap filter presets (Canva-style) — each sets several adjustment fields at once
+        Text("Filter Presets", fontSize = 12.sp, color = TextSecondary)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val presets = listOf(
+                "Vivid" to ImageAdjustments(contrast = 25f, saturation = 35f),
+                "B&W" to ImageAdjustments(grayscale = true, contrast = 10f),
+                "Vintage" to ImageAdjustments(sepia = true, vignette = 0.35f, contrast = -10f),
+                "Cool" to ImageAdjustments(hue = -20f, brightness = 5f),
+                "Warm" to ImageAdjustments(hue = 15f, saturation = 10f, brightness = 5f),
+                "Fade" to ImageAdjustments(contrast = -25f, brightness = 10f, vignette = 0.15f),
+                "Reset" to ImageAdjustments()
+            )
+            presets.forEach { (label, preset) ->
+                AssistChip(
+                    onClick = {
+                        onUpdate(preset)
+                        onCommit()
+                    },
+                    label = { Text(label, fontSize = 12.sp) }
+                )
+            }
+        }
+
         // Brightness
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Brightness: ${adjustments.brightness.toInt()}", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(110.dp))
@@ -355,6 +390,76 @@ private fun ImageAdjustmentsSection(
                 onClick = { onUpdate(adjustments.copy(invert = !adjustments.invert)) },
                 label = { Text("Invert") }
             )
+        }
+    }
+}
+
+/**
+ * Trim-based crop UI: each slider trims a percentage off one edge of the source image,
+ * rather than exposing the raw (potentially confusing) overlapping crop-window fractions
+ * directly. Internally this maps onto ImageData's cropLeft/Top/Right/Bottom (0..1 fractions).
+ * Each slider is capped at 45% so opposite edges can never cross into an inverted/empty rect.
+ */
+@Composable
+private fun CropSection(
+    imageData: ImageData,
+    onUpdateCrop: (Float, Float, Float, Float) -> Unit,
+    onCommit: () -> Unit = {}
+) {
+    val trimLeft = (imageData.cropLeft * 100f)
+    val trimTop = (imageData.cropTop * 100f)
+    val trimRight = ((1f - imageData.cropRight) * 100f)
+    val trimBottom = ((1f - imageData.cropBottom) * 100f)
+
+    fun apply(left: Float, top: Float, right: Float, bottom: Float) {
+        onUpdateCrop(left / 100f, top / 100f, 1f - right / 100f, 1f - bottom / 100f)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Crop", style = MaterialTheme.typography.titleSmall, color = CyanAccent)
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Trim Left: ${trimLeft.toInt()}%", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(110.dp))
+            Slider(
+                value = trimLeft,
+                onValueChange = { apply(it, trimTop, trimRight, trimBottom) },
+                onValueChangeFinished = onCommit,
+                valueRange = 0f..45f,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Trim Top: ${trimTop.toInt()}%", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(110.dp))
+            Slider(
+                value = trimTop,
+                onValueChange = { apply(trimLeft, it, trimRight, trimBottom) },
+                onValueChangeFinished = onCommit,
+                valueRange = 0f..45f,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Trim Right: ${trimRight.toInt()}%", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(110.dp))
+            Slider(
+                value = trimRight,
+                onValueChange = { apply(trimLeft, trimTop, it, trimBottom) },
+                onValueChangeFinished = onCommit,
+                valueRange = 0f..45f,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Trim Bottom: ${trimBottom.toInt()}%", fontSize = 12.sp, color = TextSecondary, modifier = Modifier.width(110.dp))
+            Slider(
+                value = trimBottom,
+                onValueChange = { apply(trimLeft, trimTop, trimRight, it) },
+                onValueChangeFinished = onCommit,
+                valueRange = 0f..45f,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        TextButton(onClick = { apply(0f, 0f, 0f, 0f); onCommit() }) {
+            Text("Reset crop", color = CyanAccent, fontSize = 12.sp)
         }
     }
 }

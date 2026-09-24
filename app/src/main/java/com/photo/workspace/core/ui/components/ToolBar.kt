@@ -266,6 +266,14 @@ fun BottomToolBar(
                 onClick = { onSelectTool(EditorTool.PEN) }
             )
 
+            // Eyedropper / Color Picker Tool
+            ToolButton(
+                icon = Icons.Default.Colorize,
+                label = "Eyedropper",
+                isSelected = activeTool == EditorTool.EYEDROPPER,
+                onClick = { onSelectTool(EditorTool.EYEDROPPER) }
+            )
+
             Divider(
                 modifier = Modifier
                     .height(28.dp)

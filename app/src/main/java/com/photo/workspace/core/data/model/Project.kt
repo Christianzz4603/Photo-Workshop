@@ -99,7 +99,13 @@ data class ImageData(
     val imagePath: String = "",
     val base64Data: String? = null,
     val adjustments: ImageAdjustments = ImageAdjustments(),
-    val aspectRatio: Float = 1f
+    val aspectRatio: Float = 1f,
+    // Non-destructive crop window, as fractions (0..1) of the source image.
+    // (0,0,1,1) — the default — shows the full, uncropped image.
+    val cropLeft: Float = 0f,
+    val cropTop: Float = 0f,
+    val cropRight: Float = 1f,
+    val cropBottom: Float = 1f
 )
 
 data class StrokePoint(

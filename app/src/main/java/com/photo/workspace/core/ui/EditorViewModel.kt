@@ -13,6 +13,7 @@ import com.photo.workspace.core.data.storage.PackManager
 import com.photo.workspace.core.data.storage.ProjectStorage
 import com.photo.workspace.core.data.storage.WorkspaceManager
 import com.photo.workspace.core.plugin.PluginManager
+import com.photo.workspace.core.util.BitmapCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,7 @@ enum class EditorTool {
     SHAPE,
     BRUSH,
     PEN,
+    EYEDROPPER,
     IMAGE,
     ADJUSTMENTS,
     ANIMATION
@@ -346,6 +348,102 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val currentImg = layer.imageData ?: ImageData()
         ensureHistoryCheckpoint()
         updateLayerInPage(layer.copy(imageData = currentImg.copy(adjustments = adjustments)))
+    }
+
+    /** Non-destructive crop: cropLeft/Top/Right/Bottom are fractions (0..1) of the source image. */
+    fun updateImageCrop(layerId: String, cropLeft: Float, cropTop: Float, cropRight: Float, cropBottom: Float) {
+        val page = getActivePage()
+        val layer = page.layers.find { it.id == layerId } ?: return
+        val currentImg = layer.imageData ?: return
+        ensureHistoryCheckpoint()
+        updateLayerInPage(
+            layer.copy(
+                imageData = currentImg.copy(
+                    cropLeft = cropLeft.coerceIn(0f, 0.95f),
+                    cropTop = cropTop.coerceIn(0f, 0.95f),
+                    cropRight = cropRight.coerceIn(0.05f, 1f),
+                    cropBottom = cropBottom.coerceIn(0.05f, 1f)
+                )
+            )
+        )
+    }
+
+    /**
+     * Eyedropper: samples the color of whatever is visually on top at the tapped point (any
+     * layer -- shape fill, text color, vector fill, or an actual image pixel), and applies it
+     * to the currently *selected* layer's own fill/text color. Requires a layer to already be
+     * selected, since that's the layer being recolored.
+     */
+    fun pickColorAndApply(artboardX: Float, artboardY: Float) {
+        val selId = _selectedLayerId.value
+        if (selId == null) {
+            _statusMessage.value = "Select a layer first, then tap a color to apply it"
+            return
+        }
+        val page = getActivePage()
+        val targetLayer = page.layers.find { it.id == selId } ?: return
+        if (targetLayer.locked) {
+            _statusMessage.value = "Layer is locked"
+            return
+        }
+
+        val hitLayer = page.layers.asReversed().firstOrNull { l ->
+            l.visible && artboardX >= l.x && artboardX <= l.x + l.width &&
+                artboardY >= l.y && artboardY <= l.y + l.height
+        }
+        if (hitLayer == null) {
+            _statusMessage.value = "Nothing there to sample a color from"
+            return
+        }
+
+        val sampledColor: Long? = when (hitLayer.type) {
+            LayerType.SHAPE -> hitLayer.shapeData?.fillColor
+            LayerType.TEXT -> hitLayer.textData?.fontColor
+            LayerType.VECTOR_PATH -> hitLayer.vectorPathData?.fillColor
+            LayerType.IMAGE -> sampleImagePixelColor(hitLayer, artboardX, artboardY)
+            else -> null
+        }
+        if (sampledColor == null) {
+            _statusMessage.value = "Nothing to sample a color from there"
+            return
+        }
+
+        val updatedTarget = when (targetLayer.type) {
+            LayerType.SHAPE -> targetLayer.shapeData?.let { targetLayer.copy(shapeData = it.copy(fillColor = sampledColor)) }
+            LayerType.TEXT -> targetLayer.textData?.let { targetLayer.copy(textData = it.copy(fontColor = sampledColor)) }
+            LayerType.VECTOR_PATH -> targetLayer.vectorPathData?.let { targetLayer.copy(vectorPathData = it.copy(fillColor = sampledColor)) }
+            else -> null
+        }
+        if (updatedTarget == null) {
+            _statusMessage.value = "The selected layer type can't be recolored this way"
+            return
+        }
+
+        pushHistory()
+        updateLayerInPage(updatedTarget)
+        _statusMessage.value = "Color applied"
+        _activeTool.value = EditorTool.SELECT
+    }
+
+    private fun sampleImagePixelColor(layer: Layer, artboardX: Float, artboardY: Float): Long? {
+        val img = layer.imageData ?: return null
+        if (img.imagePath.isEmpty() || layer.width <= 0f || layer.height <= 0f) return null
+        val bmp = BitmapCache.decodeSampled(
+            img.imagePath,
+            layer.width.toInt().coerceAtLeast(1),
+            layer.height.toInt().coerceAtLeast(1)
+        ) ?: return null
+
+        val relX = ((artboardX - layer.x) / layer.width).coerceIn(0f, 1f)
+        val relY = ((artboardY - layer.y) / layer.height).coerceIn(0f, 1f)
+        // Map through the layer's crop window, since the tapped point is in on-screen/layer
+        // space but the crop window determines which part of the source image is showing.
+        val u = img.cropLeft + relX * (img.cropRight - img.cropLeft)
+        val v = img.cropTop + relY * (img.cropBottom - img.cropTop)
+        val px = (u * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+        val py = (v * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+        val pixel = bmp.getPixel(px, py)
+        return pixel.toLong() and 0xFFFFFFFFL
     }
 
     fun updateAnimation(layerId: String, animation: ElementAnimation) {
